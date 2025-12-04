@@ -629,7 +629,7 @@ with gr.Blocks(title="Echo-TTS", css=LINK_CSS, js=JS_CODE) as demo:
             custom_audio_input = gr.Audio(
                 sources=["upload", "microphone"],
                 type="filepath",
-                label="Speaker Reference Audio (first two minutes used; blank for no speaker reference)",
+                label="Speaker Reference Audio (first five minutes used; blank for no speaker reference)",
                 max_length=600,
             )
 
