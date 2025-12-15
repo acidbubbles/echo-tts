@@ -5,7 +5,6 @@ from huggingface_hub import hf_hub_download
 import safetensors.torch as st
 import torch
 import torchaudio
-from torchcodec.decoders import AudioDecoder
 
 from autoencoder import DAC, build_ae
 from model import EchoDiT
@@ -101,15 +100,32 @@ def load_pca_state_from_hf(repo_id: str = "jordand/echo-tts-base", device: str =
 # ________
 
 def load_audio(path: str, max_duration: int = 300) -> torch.Tensor:
+    # Load audio using torchaudio to avoid external ffmpeg dependency.
+    # Returns mono audio shaped as (1, length) at 44.1 kHz, normalized to [-1, 1].
 
-    decoder = AudioDecoder(path)
-    sr = decoder.metadata.sample_rate
-    audio = decoder.get_samples_played_in_range(0, max_duration)
-    audio = audio.data.mean(dim=0).unsqueeze(0)
-    audio = torchaudio.functional.resample(audio, sr, 44_100)
-    audio = audio / torch.maximum(audio.abs().max(), torch.tensor(1.))
-    # is this better than clipping? should we target a specific energy level?
-    return audio
+    if path.lower().endswith(".wav"):
+        waveform, sr = torchaudio.load(path)
+        if waveform.ndim == 2 and waveform.shape[0] > 1:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        if max_duration is not None and max_duration > 0 and sr is not None:
+            max_frames = int(sr * max_duration)
+            waveform = waveform[..., :max_frames]
+        if sr != 44_100:
+            waveform = torchaudio.functional.resample(waveform, sr, 44_100)
+        max_val = waveform.abs().max()
+        denom = torch.maximum(max_val, torch.tensor(1.0, device=waveform.device, dtype=waveform.dtype))
+        waveform = waveform / denom
+        return waveform
+    else:
+        from torchcodec.decoders import AudioDecoder
+        decoder = AudioDecoder(path)
+        sr = decoder.metadata.sample_rate
+        audio = decoder.get_samples_played_in_range(0, max_duration)
+        audio = audio.data.mean(dim=0).unsqueeze(0)
+        audio = torchaudio.functional.resample(audio, sr, 44_100)
+        audio = audio / torch.maximum(audio.abs().max(), torch.tensor(1.))
+        # is this better than clipping? should we target a specific energy level?
+        return audio
 
 def tokenizer_encode(text: str, append_bos: bool = True, normalize: bool = True, return_normalized_text: bool = False) -> torch.Tensor | Tuple[torch.Tensor, str]:
 
